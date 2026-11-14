@@ -182,7 +182,8 @@ class PolarForegroundService : Service() {
         val telemetry = DiagnosticManager.telemetry.value
 
         // Ensure high-rate continuous incident recording is active so the ±90s buffer is captured
-        val incidentId = polarBleClient?.incidentRecorder?.onIncidentEscalationTriggered(alertType.displayName)
+        polarBleClient?.triggerIncidentHold(alertType.displayName)
+        val incidentId = polarBleClient?.incidentRecorder?.getCurrentIncidentId()
             ?: "incident_${System.currentTimeMillis()}"
 
         locationProvider.requestFreshPosition { position ->

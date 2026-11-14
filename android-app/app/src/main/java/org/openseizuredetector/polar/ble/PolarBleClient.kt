@@ -49,6 +49,7 @@ class PolarBleClient(
     // Adaptive Optical HR Duty Cycle & Escalation state
     private var isPpgDutyCycleActive = false
     private var isEscalatedForIncident = false
+    private var isQueryingStreams = false
     private var hasPpgCapability = false
     private var lastEscalationTriggerTime: Long = 0
     private var consecutivePreSeizureWindows = 0
@@ -236,6 +237,7 @@ class PolarBleClient(
                     "Device disconnected: ${polarDeviceInfo.name} (${polarDeviceInfo.deviceId})"
                 )
                 connectedDeviceId = null
+                isQueryingStreams = false
                 stopAccStreaming()
                 stopHrStreaming()
                 stopPpiStreaming()
@@ -494,13 +496,15 @@ class PolarBleClient(
 
     private fun queryAvailableStreamsAndStart(deviceId: String) {
         // Guard against duplicate callback executions during BLE GATT negotiation
-        if (accStreamDisposable != null || isPpgDutyCycleActive || ppgStreamDisposable != null) {
+        if (isQueryingStreams || accStreamDisposable != null || isPpgDutyCycleActive || ppgStreamDisposable != null) {
             DiagnosticManager.log(LogLevel.INFO, "Streams already initializing or active for $deviceId. Skipping redundant query.")
             return
         }
+        isQueryingStreams = true
         val queryDisposable = api.getAvailableOnlineStreamDataTypes(deviceId)
             .subscribe(
                 { availableTypes ->
+                    isQueryingStreams = false
                     DiagnosticManager.log(
                         LogLevel.SUCCESS,
                         "Online stream data types supported by $deviceId: $availableTypes"
@@ -527,6 +531,7 @@ class PolarBleClient(
                     }
                 },
                 { error ->
+                    isQueryingStreams = false
                     DiagnosticManager.log(
                         LogLevel.WARN,
                         "Could not query available stream types ($error). Attempting direct ACC stream..."
@@ -791,6 +796,20 @@ class PolarBleClient(
             }
         }
         ppiStreamDisposable = null
+    }
+
+    fun triggerIncidentHold(reason: String) {
+        val now = System.currentTimeMillis()
+        lastEscalationTriggerTime = now
+        isEscalatedForIncident = true
+        incidentRecorder.onIncidentEscalationTriggered(reason)
+        DiagnosticManager.updateTelemetry { it.copy(isIncidentRecording = true) }
+
+        val deviceId = connectedDeviceId
+        if (deviceId != null && hasPpgCapability && ppgStreamDisposable == null) {
+            DiagnosticManager.log(LogLevel.INFO, "Escalating optical PPG continuous streaming for incident: $reason")
+            startPpgStreaming(deviceId)
+        }
     }
 
     private fun checkAndHandleIncidentEscalation(

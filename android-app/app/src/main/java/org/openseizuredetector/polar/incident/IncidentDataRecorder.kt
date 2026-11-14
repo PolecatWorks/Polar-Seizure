@@ -103,8 +103,47 @@ class IncidentDataRecorder(private val context: Context) {
             // Pre-seed active incident buffers with pre-incident rolling history
             activeIncidentAccSamples = accRingBuffer.toMutableList()
             activeIncidentPpgSamples = ppgRingBuffer.toMutableList()
+            // Immediately save initial snapshot to disk so the pre-trigger buffer is instantly viewable
+            flushActiveIncidentSnapshot(currentIncidentId!!)
         }
         return currentIncidentId ?: "incident_${DATE_FORMAT.format(Date())}"
+    }
+
+    @Synchronized
+    fun flushActiveIncidentSnapshot(incidentId: String = currentIncidentId ?: "incident_${System.currentTimeMillis()}"): File? {
+        val dir = File(context.filesDir, "incidents").apply { if (!exists()) mkdirs() }
+        val file = File(dir, "$incidentId.json")
+        val accCopy = activeIncidentAccSamples.toList()
+        val ppgCopy = activeIncidentPpgSamples.toList()
+        return try {
+            val json = buildString {
+                append("{\n")
+                append("  \"incidentId\": \"$incidentId\",\n")
+                append("  \"savedAt\": ${System.currentTimeMillis()},\n")
+                append("  \"accSampleCount\": ${accCopy.size},\n")
+                append("  \"ppgSampleCount\": ${ppgCopy.size},\n")
+                append("  \"accSamples\": [\n")
+                accCopy.forEachIndexed { i, s ->
+                    append("    {\"t\":${s.timestamp},\"x\":${s.x},\"y\":${s.y},\"z\":${s.z},\"m\":${s.magnitude}}")
+                    if (i < accCopy.size - 1) append(",")
+                    append("\n")
+                }
+                append("  ],\n")
+                append("  \"ppgSamples\": [\n")
+                ppgCopy.forEachIndexed { i, s ->
+                    append("    {\"t\":${s.timestamp},\"c0\":${s.channel0},\"c1\":${s.channel1},\"bpm\":${s.derivedBpm ?: "null"}}")
+                    if (i < ppgCopy.size - 1) append(",")
+                    append("\n")
+                }
+                append("  ]\n")
+                append("}\n")
+            }
+            file.writeText(json)
+            file
+        } catch (e: Exception) {
+            DiagnosticManager.log(LogLevel.ERROR, "Failed to flush incident snapshot: ${e.message}")
+            null
+        }
     }
 
     @Synchronized
