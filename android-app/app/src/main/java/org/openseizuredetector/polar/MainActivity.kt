@@ -432,7 +432,7 @@ fun DashboardView(
             modifier = Modifier.fillMaxWidth(),
             colors = CardDefaults.cardColors(
                 containerColor = when {
-                    telemetry.energyRatioPercent >= 50.0 -> Color(0xFFFFCDD2) // Alert
+                    telemetry.energyRatioPercent >= 55.0 -> Color(0xFFFFCDD2) // Alert
                     telemetry.seizurePower3to8Hz > 0.05 -> Color(0xFFFFF9C4) // Warning
                     telemetry.connectionState == "CONNECTED" -> Color(0xFFE8F5E9) // OK
                     else -> Color(0xFFECEFF1)
@@ -519,7 +519,7 @@ fun DashboardView(
                     horizontalArrangement = Arrangement.SpaceBetween
                 ) {
                     Text(
-                        text = "Ratio: %.1f%% / 50%% threshold".format(telemetry.energyRatioPercent),
+                        text = "Ratio: %.1f%% / 55%% threshold".format(telemetry.energyRatioPercent),
                         style = MaterialTheme.typography.bodySmall
                     )
                     Text(
@@ -590,8 +590,8 @@ fun DashboardView(
                                 strokeWidth = 1f
                             )
 
-                            // Threshold line for seizure energy (50%)
-                            val threshY = h * (1f - 0.50f)
+                            // Threshold line for seizure energy (55%)
+                            val threshY = h * (1f - 0.55f)
                             drawLine(
                                 color = Color(0x66FF5252),
                                 start = Offset(0f, threshY),
