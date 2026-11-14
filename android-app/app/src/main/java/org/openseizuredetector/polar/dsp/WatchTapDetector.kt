@@ -26,8 +26,8 @@ import kotlin.math.sqrt
  *      or clonic seizure vibration), the gesture sequence resets to avoid false panic alerts.
  */
 class WatchTapDetector(
-    val minTapMagnitudeG: Double = 1.45,
-    val minJerkG: Double = 0.55,
+    val minTapMagnitudeG: Double = 1.65,
+    val minJerkG: Double = 0.75,
     val minInterTapIntervalMs: Long = 160L,
     val maxInterTapIntervalMs: Long = 650L,
     val maxGestureDurationMs: Long = 1800L,

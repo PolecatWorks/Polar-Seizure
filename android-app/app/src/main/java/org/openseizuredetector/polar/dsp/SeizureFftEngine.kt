@@ -12,7 +12,7 @@ import kotlin.math.sqrt
 class SeizureFftEngine(
     val windowSize: Int = 128,
     val sampleRateHz: Double = 25.0,
-    val warningRatioThreshold: Float = 0.50f,
+    val warningRatioThreshold: Float = 0.55f,
     val minMovementPowerThreshold: Float = 0.05f
 ) {
     private val buffer = DoubleArray(windowSize)
@@ -21,7 +21,7 @@ class SeizureFftEngine(
 
     private var consecutiveWarningWindows = 0
     val warningWindowLimit = 2 // ~5 seconds at 50% overlap of 128 samples
-    val alarmWindowLimit = 4   // ~10 seconds
+    val alarmWindowLimit = 5   // ~12.5 seconds (calibrated to reject transient false alarms)
 
     private var lastBandPower: Double = 0.0
     private var lastTotalPower: Double = 0.0
