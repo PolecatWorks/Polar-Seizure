@@ -1,9 +1,10 @@
 .PHONY: all build test clean \
-        build-be build-fe build-android \
-        test-be test-fe test-android \
+        build-be build-fe build-android build-tools \
+        test-be test-fe test-android test-tools \
         ps-be-dev ps-be-test ps-be-check ps-be-fmt ps-be-docker ps-be-docker-run \
         ps-fe-dev ps-fe-test ps-fe-docker ps-fe-docker-run \
         ps-android-build ps-android-test ps-android-lint \
+        ps-tools-build ps-tools-test \
         pre-commit-run pre-commit-install
 
 BASE_DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
@@ -37,8 +38,8 @@ ANDROID_GRADLE_ENV := $(if $(ANDROID_JAVA_HOME),JAVA_HOME=$(ANDROID_JAVA_HOME))
 all: build test
 
 # Top-level compound targets
-build: build-be build-fe build-android
-test: test-be test-fe test-android
+build: build-be build-fe build-android build-tools
+test: test-be test-fe test-android test-tools
 
 # --- Backend Container Targets ---
 build-be: ps-be-docker
@@ -104,6 +105,16 @@ ps-android-test:
 
 ps-android-lint:
 	cd android-app && $(ANDROID_GRADLE_ENV) ./gradlew lintDebug
+
+# --- Telemetry Analyzer Tool Targets ---
+build-tools: ps-tools-build
+test-tools: ps-tools-test
+
+ps-tools-build:
+	cd telemetry-analyzer && cargo build --release
+
+ps-tools-test:
+	cd telemetry-analyzer && cargo test
 
 # --- Quality Assurance & Pre-commit Hooks ---
 pre-commit-install:

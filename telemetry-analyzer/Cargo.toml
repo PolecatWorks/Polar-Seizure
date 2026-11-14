@@ -1,0 +1,17 @@
+[package]
+name = "telemetry-analyzer"
+version = "0.1.0"
+edition = "2021"
+description = "High-performance CLI tool to analyze Polar-Seizure telemetry feeds, replay DSP/FFT algorithms, inspect false positive triggers, and calibrate detector thresholds."
+
+[dependencies]
+clap = { version = "4.5", features = ["derive"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+flate2 = "1.0"
+rustfft = "6.2"
+comfy-table = "7.1"
+colored = "2.1"
+chrono = { version = "0.4", features = ["serde"] }
+anyhow = "1.0"
+glob = "0.3"
