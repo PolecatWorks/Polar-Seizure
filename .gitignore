@@ -25,3 +25,4 @@ captures/
 .cxx/
 *.apk
 *.aab
+telemetry_data/
