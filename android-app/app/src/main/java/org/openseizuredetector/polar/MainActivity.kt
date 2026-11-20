@@ -9,6 +9,8 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import android.net.Uri
+import android.os.PowerManager
+import android.provider.Settings
 import android.widget.Toast
 import java.util.Locale
 import androidx.activity.ComponentActivity
@@ -230,12 +232,42 @@ fun MainScreen(
         }
     }
 
+    val powerManager = remember { context.getSystemService(Context.POWER_SERVICE) as? PowerManager }
+    var isIgnoringBatteryOptimizations by remember {
+        mutableStateOf(powerManager?.isIgnoringBatteryOptimizations(context.packageName) ?: true)
+    }
+
+    val batteryOptLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) {
+        isIgnoringBatteryOptimizations = powerManager?.isIgnoringBatteryOptimizations(context.packageName) ?: true
+    }
+
+    fun requestBatteryOptimizationExemption() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !isIgnoringBatteryOptimizations) {
+            try {
+                val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                    data = Uri.parse("package:${context.packageName}")
+                }
+                batteryOptLauncher.launch(intent)
+            } catch (e: Exception) {
+                try {
+                    val fallbackIntent = Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+                    batteryOptLauncher.launch(fallbackIntent)
+                } catch (ignored: Exception) {}
+            }
+        }
+    }
+
     fun checkAndStartService() {
         val missing = requiredPermissions.filter {
             ContextCompat.checkSelfPermission(context, it) != PackageManager.PERMISSION_GRANTED
         }
         if (missing.isEmpty()) {
             onStartService()
+            if (!isIgnoringBatteryOptimizations) {
+                requestBatteryOptimizationExemption()
+            }
         } else {
             permissionLauncher.launch(missing.toTypedArray())
         }
@@ -339,6 +371,8 @@ fun MainScreen(
                         isMonitoring = isMonitoring,
                         devices = discoveredDevices,
                         connectedDeviceId = telemetry.connectedDeviceId,
+                        isIgnoringBatteryOptimizations = isIgnoringBatteryOptimizations,
+                        onRequestBatteryOptimizationExemption = { requestBatteryOptimizationExemption() },
                         onStart = { checkAndStartService() },
                         onStop = { onStopService() },
                         onConnect = onConnectDevice,
@@ -1216,6 +1250,8 @@ fun DevicesView(
     isMonitoring: Boolean,
     devices: List<DiscoveredDevice>,
     connectedDeviceId: String?,
+    isIgnoringBatteryOptimizations: Boolean,
+    onRequestBatteryOptimizationExemption: () -> Unit,
     onStart: () -> Unit,
     onStop: () -> Unit,
     onConnect: (String) -> Unit,
@@ -1242,7 +1278,7 @@ fun DevicesView(
                 )
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    text = if (isMonitoring) "Service is ACTIVE (Auto-starts on boot)" else "Service is STOPPED",
+                    text = if (isMonitoring) "Service is ACTIVE (Foreground Service + Partial WakeLock)" else "Service is STOPPED",
                     style = MaterialTheme.typography.bodySmall,
                     color = if (isMonitoring) Color(0xFF388E3C) else Color.Gray,
                     fontWeight = FontWeight.SemiBold
@@ -1267,6 +1303,38 @@ fun DevicesView(
                         enabled = isMonitoring
                     ) {
                         Text("Stop Service")
+                    }
+                }
+            }
+        }
+
+        // Background Execution & Battery Optimization Card
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !isIgnoringBatteryOptimizations) {
+            Spacer(modifier = Modifier.height(8.dp))
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF3E0)),
+                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFFFB74D))
+            ) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Text(
+                        text = "⚡ Background Battery Optimization",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = Color(0xFFE65100)
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "Android Doze may restrict continuous BLE sensor reconnection while screen is off. Grant battery exemption for uninterrupted 24/7 background monitoring.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color(0xFF5D4037)
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Button(
+                        onClick = onRequestBatteryOptimizationExemption,
+                        colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFF57C00))
+                    ) {
+                        Text("Disable Battery Restrictions")
                     }
                 }
             }
