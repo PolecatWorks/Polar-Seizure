@@ -56,17 +56,32 @@ class PolarBleClient(
     private var dutyCycleStartTime: Long = 0
     private var lastMovementTime: Long = 0
 
-    // Periodic Disconnected Scanner (every 5 minutes)
+    // Adaptive Disconnected Reconnection Backoff (starts at 5s, doubles up to 60s max)
     private var isAutoReconnectScanning = false
+    private var currentReconnectIntervalMs = INITIAL_RECONNECT_INTERVAL_MS
+    private val scanTimeoutRunnable = Runnable {
+        if (isAutoReconnectScanning && connectedDeviceId == null) {
+            DiagnosticManager.log(
+                LogLevel.INFO,
+                "Scan window (${DISCONNECTED_SCAN_DURATION_MS / 1000}s) complete without detection. Scheduling next reconnection attempt in ${currentReconnectIntervalMs / 1000}s..."
+            )
+            stopScan()
+            isAutoReconnectScanning = false
+            // Exponential backoff capped at MAX_RECONNECT_INTERVAL_MS
+            currentReconnectIntervalMs = (currentReconnectIntervalMs * 2).coerceAtMost(MAX_RECONNECT_INTERVAL_MS)
+            handler.removeCallbacks(disconnectedScanRunnable)
+            handler.postDelayed(disconnectedScanRunnable, currentReconnectIntervalMs)
+        }
+    }
+
     private val disconnectedScanRunnable = object : Runnable {
         override fun run() {
             if (connectedDeviceId == null) {
                 DiagnosticManager.log(
                     LogLevel.INFO,
-                    "Periodic reconnection check: device is disconnected. Scanning for previously used Polar device..."
+                    "Reconnection check: device is disconnected. Initiating ${DISCONNECTED_SCAN_DURATION_MS / 1000}s scan / auto-connect..."
                 )
                 startDisconnectedScan()
-                handler.postDelayed(this, DISCONNECTED_SCAN_INTERVAL_MS)
             } else {
                 stopDisconnectedScan()
             }
@@ -118,8 +133,10 @@ class PolarBleClient(
     companion object {
         private const val MIN_SCAN_INTERVAL_MS = 3000L
         private const val SCAN_RETRY_DELAY_MS = 5000L
-        // Periodic auto-reconnect scan cadence when disconnected: 5 minutes (300 seconds)
-        private const val DISCONNECTED_SCAN_INTERVAL_MS = 300_000L
+        // Adaptive reconnect retry backoff: starts at 5s, doubles up to 60s max
+        private const val INITIAL_RECONNECT_INTERVAL_MS = 5_000L
+        private const val MAX_RECONNECT_INTERVAL_MS = 60_000L
+        private const val DISCONNECTED_SCAN_DURATION_MS = 20_000L
         // Chart window: 5 minutes (300 seconds)
         // Record 1 point every 500ms = 600 points for a smooth 5-minute accelerometer & energy timeline
         private const val CHART_SAMPLE_INTERVAL_MS = 500L
@@ -259,7 +276,7 @@ class PolarBleClient(
                     )
                 }
                 onAlarmStateChanged(SeizureAlarmState.DISCONNECTED)
-                scheduleDisconnectedPeriodicScan()
+                scheduleDisconnectedPeriodicScan(resetBackoff = true)
             }
 
             override fun bleSdkFeatureReady(identifier: String, feature: PolarBleApi.PolarBleSdkFeature) {
@@ -387,7 +404,7 @@ class PolarBleClient(
     }
 
     fun stopScan() {
-        handler.removeCallbacksAndMessages(null)
+        handler.removeCallbacks(scanTimeoutRunnable)
         isScanRetryScheduled = false
         scanDisposable?.let {
             if (!it.isDisposed) {
@@ -399,16 +416,20 @@ class PolarBleClient(
     }
 
     /**
-     * Schedules periodic BLE scan execution every 5 minutes while the device remains disconnected.
+     * Schedules periodic BLE reconnect and scan execution while the device remains disconnected.
+     * Uses adaptive backoff starting at 5s, doubling up to 60s max.
      */
-    fun scheduleDisconnectedPeriodicScan() {
+    fun scheduleDisconnectedPeriodicScan(resetBackoff: Boolean = false) {
         if (connectedDeviceId != null) return
+        if (resetBackoff) {
+            currentReconnectIntervalMs = INITIAL_RECONNECT_INTERVAL_MS
+        }
         handler.removeCallbacks(disconnectedScanRunnable)
         DiagnosticManager.log(
             LogLevel.INFO,
-            "Device disconnected. Scheduling periodic BLE background scan every ${DISCONNECTED_SCAN_INTERVAL_MS / 60000} minutes."
+            "Device disconnected. Scheduling BLE reconnection attempt in ${currentReconnectIntervalMs / 1000}s..."
         )
-        handler.postDelayed(disconnectedScanRunnable, DISCONNECTED_SCAN_INTERVAL_MS)
+        handler.postDelayed(disconnectedScanRunnable, currentReconnectIntervalMs)
     }
 
     private fun startDisconnectedScan() {
@@ -417,24 +438,34 @@ class PolarBleClient(
             return
         }
         isAutoReconnectScanning = true
+
+        // 1. If we have a remembered device, immediately try direct connect
+        val rememberedId = getLastConnectedDeviceId()
+        if (!rememberedId.isNullOrEmpty()) {
+            DiagnosticManager.log(
+                LogLevel.INFO,
+                "Attempting direct reconnect to remembered sensor: $rememberedId..."
+            )
+            try {
+                api.connectToDevice(rememberedId)
+            } catch (e: Exception) {
+                DiagnosticManager.log(LogLevel.WARN, "Direct connect call to $rememberedId: ${e.message}")
+            }
+        }
+
+        // 2. Concurrently run BLE scanner to detect nearby Polar sensors or newly available straps
         startScan(isRetry = false)
 
-        // Run disconnected scan for 20 seconds, then stop and wait for next 5-minute tick
-        handler.postDelayed({
-            if (isAutoReconnectScanning && connectedDeviceId == null) {
-                DiagnosticManager.log(
-                    LogLevel.INFO,
-                    "Periodic 20s scan window complete. Waiting ${DISCONNECTED_SCAN_INTERVAL_MS / 60000} mins for next scan..."
-                )
-                stopScan()
-                isAutoReconnectScanning = false
-            }
-        }, 20_000L)
+        // 3. Scan for DISCONNECTED_SCAN_DURATION_MS (20s). If still disconnected, back off and retry.
+        handler.removeCallbacks(scanTimeoutRunnable)
+        handler.postDelayed(scanTimeoutRunnable, DISCONNECTED_SCAN_DURATION_MS)
     }
 
     fun stopDisconnectedScan() {
         handler.removeCallbacks(disconnectedScanRunnable)
+        handler.removeCallbacks(scanTimeoutRunnable)
         isAutoReconnectScanning = false
+        currentReconnectIntervalMs = INITIAL_RECONNECT_INTERVAL_MS
     }
 
     fun autoConnectIfRemembered(): Boolean {
@@ -487,7 +518,7 @@ class PolarBleClient(
                         isIncidentRecording = false
                     )
                 }
-                scheduleDisconnectedPeriodicScan()
+                scheduleDisconnectedPeriodicScan(resetBackoff = true)
             }
         } catch (e: Exception) {
             DiagnosticManager.log(LogLevel.ERROR, "Failed to disconnect $deviceId: ${e.localizedMessage}")
